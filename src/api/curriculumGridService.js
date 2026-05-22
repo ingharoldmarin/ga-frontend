@@ -13,6 +13,7 @@ export const curriculumGridService = {
 
     if (filters.grade_id) params.append('grade_id', filters.grade_id)
     if (filters.subject_id) params.append('subject_id', filters.subject_id)
+    if (filters.period) params.append('period', filters.period)
     if (filters.active !== undefined) params.append('active', filters.active)
 
     const { data } = await api.get(`/curriculum-grid?${params.toString()}`)

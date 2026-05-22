@@ -248,16 +248,121 @@ export const evidenceService = {
   }
   
 }
-export const gradeService = {
-  getAll: (page = 1, limit = 100) => api.get(`/grades?page=${page}&limit=${limit}`),
-  create: (data) => api.post(`/grades`, data),
-  update: (id, data) => api.put(`/grades/${id}`, data),
-  delete: (id) => api.delete(`/grades/${id}`)
+// ── localStorage helpers ───────────────────────────────────────────────
+const lsItem = (key) => ({
+  get:    ()     => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } },
+  set:    (d)    => localStorage.setItem(key, JSON.stringify(d)),
+  nextId: ()     => Date.now() + Math.floor(Math.random() * 1000),
+})
+
+// ── gradeService ───────────────────────────────────────────────────────
+const lsGrades = lsItem('ga_grades')
+
+// Normaliza la respuesta del API a un array plano
+const normalize = (res) => {
+  const d = res?.data
+  if (Array.isArray(d)) return d
+  if (Array.isArray(d?.data)) return d.data
+  return []
 }
 
+// Solo los campos que existen en la tabla grade/subject de la BD
+const gradeFields  = (d) => ({ name: d.name, description: d.description || '' })
+const subjectFields = (d) => ({ name: d.name, description: d.description || '' })
+
+export const gradeService = {
+  getAll: async (page = 1) => {
+    try {
+      const res = await api.get('/grades', { params: { page, per_page: 100 } })
+      const items = normalize(res)
+      if (items.length) { lsGrades.set(items); return { data: items } }
+      return { data: lsGrades.get() }
+    } catch {
+      return { data: lsGrades.get() }
+    }
+  },
+  create: async (data) => {
+    try {
+      const res = await api.post('/grades', gradeFields(data))
+      const item = res.data?.data ?? res.data
+      const all = lsGrades.get(); all.push(item); lsGrades.set(all)
+      return { data: item }
+    } catch {
+      const all = lsGrades.get()
+      const item = { ...gradeFields(data), id: lsGrades.nextId(), created_at: new Date().toISOString() }
+      all.push(item); lsGrades.set(all)
+      return { data: item }
+    }
+  },
+  update: async (id, data) => {
+    try {
+      const res = await api.put(`/grades/${id}`, gradeFields(data))
+      const updated = res.data?.data ?? res.data ?? data
+      lsGrades.set(lsGrades.get().map(g => g.id === id ? { ...g, ...updated } : g))
+      return { data: updated }
+    } catch {
+      const all = lsGrades.get()
+      const idx = all.findIndex(g => g.id === id)
+      if (idx > -1) { all[idx] = { ...all[idx], ...gradeFields(data) }; lsGrades.set(all) }
+      return { data: all[idx] ?? data }
+    }
+  },
+  delete: async (id) => {
+    try {
+      await api.delete(`/grades/${id}`)
+    } finally {
+      lsGrades.set(lsGrades.get().filter(g => g.id !== id))
+    }
+    return { data: { success: true } }
+  },
+}
+
+// ── subjectService ─────────────────────────────────────────────────────
+const lsSubjects = lsItem('ga_subjects')
+
 export const subjectService = {
-  getAll: (page = 1, limit = 100) => api.get(`/subjects?page=${page}&limit=${limit}`),
-  create: (data) => api.post(`/subjects`, data),
-  update: (id, data) => api.put(`/subjects/${id}`, data),
-  delete: (id) => api.delete(`/subjects/${id}`)
+  getAll: async (page = 1) => {
+    try {
+      const res = await api.get('/subjects', { params: { page, per_page: 100 } })
+      const items = normalize(res)
+      if (items.length) { lsSubjects.set(items); return { data: items } }
+      return { data: lsSubjects.get() }
+    } catch {
+      return { data: lsSubjects.get() }
+    }
+  },
+  create: async (data) => {
+    try {
+      const res = await api.post('/subjects', subjectFields(data))
+      const item = res.data?.data ?? res.data
+      const all = lsSubjects.get(); all.push(item); lsSubjects.set(all)
+      return { data: item }
+    } catch {
+      const all = lsSubjects.get()
+      const item = { ...subjectFields(data), id: lsSubjects.nextId(), created_at: new Date().toISOString() }
+      all.push(item); lsSubjects.set(all)
+      return { data: item }
+    }
+  },
+  update: async (id, data) => {
+    try {
+      const res = await api.put(`/subjects/${id}`, subjectFields(data))
+      const updated = res.data?.data ?? res.data ?? data
+      lsSubjects.set(lsSubjects.get().map(s => s.id === id ? { ...s, ...updated } : s))
+      return { data: updated }
+    } catch {
+      const all = lsSubjects.get()
+      const idx = all.findIndex(s => s.id === id)
+      if (idx > -1) { all[idx] = { ...all[idx], ...subjectFields(data) }; lsSubjects.set(all) }
+      return { data: all[idx] ?? data }
+    }
+  },
+  delete: async (id) => {
+    try {
+      await api.delete(`/subjects/${id}`)
+    } finally {
+      lsSubjects.set(lsSubjects.get().filter(s => s.id !== id))
+    }
+    return { data: { success: true } }
+  },
 }

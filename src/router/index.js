@@ -57,9 +57,22 @@ const routes = [
     path: '/teacher/schedule/:gradeId/:subjectId/:gridId',
     name: 'ScheduleManagement',
     component: () => import('@/views/ScheduleManagement.vue'),
-    meta: { 
+    meta: {
       requiresAuth: true,
       requiresRole: 'profesor'
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ RUTAS DEL ESTUDIANTE
+  // ═══════════════════════════════════════════════════════════════════
+  {
+    path: '/student',
+    name: 'StudentPortal',
+    component: () => import('@/views/StudentView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresRole: 'estudiante'
     }
   }
 ]
@@ -78,10 +91,21 @@ router.beforeEach((to, from, next) => {
     next('/login')
     return
   }
+
+  // Redirigir desde /dashboard solo para roles con portal propio
+  if (to.path === '/dashboard' && authStore.isAuthenticated) {
+    if (authStore.isStudent)     { next('/student');      return }
+    if (authStore.isTeacher)     { next('/teacher');      return }
+    if (authStore.isCoordinator) { next('/coordinator');  return }
+    // Admins permanecen en /dashboard
+  }
   
   // Redirigir usuarios autenticados fuera de login
   if (to.meta.guest && authStore.isAuthenticated) {
-    next('/dashboard')
+    if (authStore.isStudent)          next('/student')
+    else if (authStore.isTeacher)     next('/teacher')
+    else if (authStore.isCoordinator) next('/coordinator')
+    else                              next('/dashboard')
     return
   }
 
@@ -113,6 +137,8 @@ router.beforeEach((to, from, next) => {
         next('/coordinator')
       } else if (authStore.isTeacher) {
         next('/teacher')
+      } else if (authStore.isStudent) {
+        next('/student')
       } else {
         next('/dashboard')
       }

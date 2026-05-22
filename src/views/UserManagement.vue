@@ -4,31 +4,26 @@ import { userService, roleService } from '@/api/userService'
 import { schoolService } from '@/api/schoolService'
 import { useAuthStore } from '@/stores/auth'
 import { excelService } from '@/utils/excelService'
+import { useUsers } from '@/composables/useUsers'
 
 const authStore = useAuthStore()
-const users = ref([])
 const roles = ref([])
 const schools = ref([])
-const loading = ref(false)
 const showModal = ref(false)
 const showBulkModal = ref(false)
 const isEditing = ref(false)
 const editingUserId = ref(null)
-const errorMessage = ref('')
 const successMessage = ref('')
 const bulkErrors = ref([])
 const previewData = ref([])
 const uploadProgress = ref(0)
 
-// ⭐ Variables de paginación
-const currentPage = ref(1)
-const perPage = ref(20)
-const totalUsers = ref(0)
-const totalPages = ref(0)
-
-// ⭐ Variable de búsqueda
-const searchQuery = ref('')
-const allUsersCache = ref([]) // Cache de todos los usuarios sin filtrar
+const {
+  users, loading, errorMessage,
+  searchQuery, currentPage, totalUsers, totalPages,
+  coordinatorSchoolIds,
+  loadUsers, goToPage, visiblePages,
+} = useUsers()
 
 // Formulario de nuevo usuario
 const formData = ref({
@@ -38,96 +33,9 @@ const formData = ref({
   username: '',
   password: '',
   password_confirmation: '',
-  school_ids: [], // Array de IDs de colegios
+  school_ids: [],
   roles: []
 })
-
-// Cargar usuarios y roles
-const loadUsers = async () => {
-  loading.value = true
-  try {
-    // ⭐ Cargar TODOS los usuarios de una vez (sin paginación del servidor)
-    const response = await userService.getAll(1, 1000) // Cargar hasta 1000 usuarios
-    console.log('Respuesta completa:', response)
-    
-    // Laravel devuelve los datos paginados
-    let allUsers = []
-    if (response.data && Array.isArray(response.data)) {
-      allUsers = response.data
-      totalUsers.value = response.total || allUsers.length
-    } else if (Array.isArray(response)) {
-      allUsers = response
-      totalUsers.value = allUsers.length
-    } else {
-      console.error('Formato de respuesta inesperado:', response)
-      allUsers = []
-      totalUsers.value = 0
-    }
-    
-    console.log('📊 Total de usuarios cargados:', allUsers.length)
-    
-    // Si el usuario actual es coordinador, buscar sus datos completos y actualizar el store
-    if (authStore.isCoordinator && authStore.user) {
-      const currentUser = allUsers.find(user => user.id === authStore.user.id)
-      console.log('🔍 Buscando datos del coordinador actual')
-      console.log('ID del coordinador:', authStore.user.id)
-      console.log('Coordinador encontrado en la lista:', currentUser)
-      
-      if (currentUser && currentUser.schools) {
-        console.log('✅ Colegios encontrados para el coordinador:', currentUser.schools)
-        authStore.updateUserSchools(currentUser.schools)
-        console.log('✅ authStore.user actualizado')
-      } else {
-        console.warn('⚠️ El coordinador no tiene colegios asignados en la respuesta del backend')
-      }
-    }
-    
-    // Filtrar usuarios según el rol
-    if (authStore.isAdmin) {
-      // Admin ve todos los usuarios
-      users.value = allUsers
-    } else if (authStore.isCoordinator) {
-      // Obtener IDs de colegios del coordinador
-      const coordinatorSchoolIds = authStore.user?.schools?.map(school => school.id) || []
-      console.log('IDs de colegios del coordinador:', coordinatorSchoolIds)
-      
-      // Coordinador solo ve usuarios de sus colegios (excepto admins)
-      users.value = allUsers.filter(user => {
-        // No mostrar usuarios con rol admin
-        const hasAdminRole = user.roles?.some(role => role.name === 'admin')
-        if (hasAdminRole) return false
-        
-        // Verificar si el usuario pertenece a alguno de los colegios del coordinador
-        if (!user.schools || user.schools.length === 0) {
-          return false
-        }
-        
-        // Verificar si hay intersección entre los colegios del usuario y del coordinador
-        const hasCommonSchool = user.schools.some(userSchool => 
-          coordinatorSchoolIds.includes(userSchool.id)
-        )
-        
-        return hasCommonSchool
-      })
-      
-      console.log('Usuarios filtrados para coordinador:', users.value.length)
-    } else {
-      users.value = allUsers
-    }
-    
-    // ⭐ Calcular páginas totales basado en usuarios filtrados
-    totalUsers.value = users.value.length
-    totalPages.value = Math.ceil(users.value.length / perPage.value) || 1
-    
-    console.log('Usuarios cargados:', users.value.length)
-    console.log('Total de páginas:', totalPages.value)
-  } catch (error) {
-    console.error('Error al cargar usuarios:', error)
-    errorMessage.value = 'Error al cargar usuarios: ' + (error.response?.data?.message || error.message)
-  } finally {
-    loading.value = false
-  }
-}
 
 const loadRoles = async () => {
   try {
@@ -190,31 +98,8 @@ const loadSchools = async () => {
 
 // Computed: verificar si el coordinador tiene colegio asignado
 const coordinatorHasSchool = computed(() => {
-  console.log('=== Verificando colegio del coordinador ===')
-  console.log('Es coordinador?', authStore.isCoordinator)
-  console.log('Usuario completo:', authStore.user)
-  console.log('Colegios del usuario:', authStore.user?.schools)
-  
-  if (!authStore.isCoordinator) return true // Si no es coordinador, permitir
-  
-  // Primera verificación: desde authStore
-  const hasSchoolsInStore = 
-    (authStore.user?.schools && authStore.user.schools.length > 0) ||
-    (authStore.user?.school_id) ||
-    (authStore.user?.school)
-  
-  // Segunda verificación: buscar en la lista de usuarios cargados
-  if (!hasSchoolsInStore && users.value.length > 0 && authStore.user) {
-    const currentUser = users.value.find(u => u.id === authStore.user.id)
-    if (currentUser && currentUser.schools && currentUser.schools.length > 0) {
-      console.log('Colegio encontrado en la lista de usuarios:', currentUser.schools)
-      return true
-    }
-  }
-  
-  console.log('Tiene colegios?', hasSchoolsInStore)
-  
-  return hasSchoolsInStore
+  if (!authStore.isCoordinator) return true
+  return coordinatorSchoolIds.value.length > 0
 })
 
 // Computed: verificar si puede crear usuarios
@@ -222,12 +107,6 @@ const canCreateUsers = computed(() => {
   if (authStore.isAdmin) return true
   if (authStore.isCoordinator) return coordinatorHasSchool.value
   return false
-})
-
-// Obtener IDs de colegios del usuario autenticado
-const getUserSchoolIds = computed(() => {
-  if (!authStore.user?.schools) return []
-  return authStore.user.schools.map(school => school.id)
 })
 
 // Computed property para el título según el rol
@@ -349,46 +228,17 @@ const handleSubmit = async () => {
       userData.password = formData.value.password
     }
 
-    console.log('=== INICIO OPERACIÓN DE USUARIO ===')
-    console.log('Es edición?', isEditing.value)
-    console.log('Usuario autenticado:', authStore.user)
-    console.log('Es coordinador?', authStore.isCoordinator)
-
-    // Si es coordinador, asignar automáticamente sus colegios al nuevo usuario
+    // Si es coordinador, asignar sus colegios automáticamente
     if (authStore.isCoordinator) {
-      // Primero intentar desde authStore
-      if (authStore.user?.schools && authStore.user.schools.length > 0) {
-        userData.school_ids = authStore.user.schools.map(school => school.id)
-        console.log('✅ Colegios obtenidos desde authStore.user.schools')
-      } else {
-        // Si no hay en authStore, buscar en la lista de usuarios cargados
-        console.log('⚠️ authStore.user.schools está vacío, buscando en users.value')
-        const currentUserInList = users.value.find(u => u.id === authStore.user?.id)
-        console.log('Usuario encontrado en lista:', currentUserInList)
-        
-        if (currentUserInList && currentUserInList.schools && currentUserInList.schools.length > 0) {
-          userData.school_ids = currentUserInList.schools.map(school => school.id)
-          console.log('✅ Colegios obtenidos desde la lista de usuarios')
-          
-          // Actualizar authStore para futuras operaciones usando el método del store
-          authStore.updateUserSchools(currentUserInList.schools)
-        } else {
-          console.error('❌ NO SE ENCONTRARON COLEGIOS PARA EL COORDINADOR')
-          errorMessage.value = 'Error: No tienes colegios asignados. Contacta al administrador.'
-          loading.value = false
-          return
-        }
+      if (coordinatorSchoolIds.value.length === 0) {
+        errorMessage.value = 'Error: No tienes colegios asignados. Contacta al administrador.'
+        loading.value = false
+        return
       }
-      
-      console.log('🏫 Coordinador - IDs de colegios a asignar:', userData.school_ids)
-      
+      userData.school_ids = coordinatorSchoolIds.value
     } else if (authStore.isAdmin && formData.value.school_ids.length > 0) {
-      // Si es admin, usar los colegios seleccionados en el formulario
       userData.school_ids = formData.value.school_ids
-      console.log('👤 Admin - colegios seleccionados:', userData.school_ids)
     }
-
-    console.log('📤 DATOS FINALES A ENVIAR:', JSON.stringify(userData, null, 2))
 
     let response
     if (isEditing.value) {
@@ -404,13 +254,8 @@ const handleSubmit = async () => {
     
     console.log('✅ Respuesta del backend:', response)
     
-    // Recargar lista de usuarios
     await loadUsers()
-    
-    // Cerrar modal después de 1.5 segundos
-    setTimeout(() => {
-      closeModal()
-    }, 1500)
+    setTimeout(() => closeModal(), 1500)
   } catch (error) {
     console.error('❌ Error al crear/actualizar usuario:', error)
     errorMessage.value = error.response?.data?.message || 'Error al procesar el usuario'
@@ -443,10 +288,7 @@ const deleteUser = async (userId) => {
     await userService.delete(userId)
     successMessage.value = 'Usuario eliminado exitosamente'
     await loadUsers()
-    
-    setTimeout(() => {
-      successMessage.value = ''
-    }, 3000)
+    setTimeout(() => { successMessage.value = '' }, 3000)
   } catch (error) {
     console.error('Error al eliminar:', error)
     errorMessage.value = error.response?.data?.message || 'Error al eliminar usuario'
@@ -475,139 +317,8 @@ const toggleSchool = (schoolId) => {
   }
 }
 
-// ⭐ Métodos de paginación
-const goToPage = (page) => {
-  const maxPages = searchQuery.value ? searchTotalPages.value : totalPages.value
-  if (page >= 1 && page <= maxPages && page !== currentPage.value) {
-    currentPage.value = page
-  }
-}
-
-const nextPage = () => {
-  const maxPages = searchQuery.value ? searchTotalPages.value : totalPages.value
-  if (currentPage.value < maxPages) {
-    goToPage(currentPage.value + 1)
-  }
-}
-
-const previousPage = () => {
-  if (currentPage.value > 1) {
-    goToPage(currentPage.value - 1)
-  }
-}
-
-// ⭐ Método para manejar búsqueda
-const handleSearch = () => {
-  // Resetear a la primera página cuando se busca
-  currentPage.value = 1
-}
-
-// Computed para páginas visibles en el paginador
-const visiblePages = computed(() => {
-  const pages = []
-  const total = totalPages.value
-  const current = currentPage.value
-  
-  if (total <= 7) {
-    // Mostrar todas las páginas si son 7 o menos
-    for (let i = 1; i <= total; i++) {
-      pages.push(i)
-    }
-  } else {
-    // Siempre mostrar primera página
-    pages.push(1)
-    
-    if (current > 3) {
-      pages.push('...')
-    }
-    
-    // Páginas alrededor de la actual
-    for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
-      pages.push(i)
-    }
-    
-    if (current < total - 2) {
-      pages.push('...')
-    }
-    
-    // Siempre mostrar última página
-    pages.push(total)
-  }
-  
-  return pages
-})
-
-// ⭐ Computed para filtrar usuarios por búsqueda
-const filteredUsers = computed(() => {
-  if (!searchQuery.value.trim()) {
-    return users.value
-  }
-
-  const query = searchQuery.value.toLowerCase().trim()
-  
-  return users.value.filter(user => {
-    // Buscar en nombre completo
-    const fullName = `${user.first_name} ${user.last_name}`.toLowerCase()
-    if (fullName.includes(query)) return true
-    
-    // Buscar en email
-    if (user.email?.toLowerCase().includes(query)) return true
-    
-    // Buscar en username
-    if (user.username?.toLowerCase().includes(query)) return true
-    
-    // Buscar en roles
-    const userRoles = user.roles?.map(r => r.name.toLowerCase()).join(' ') || ''
-    if (userRoles.includes(query)) return true
-    
-    // Buscar en colegios
-    const userSchools = user.schools?.map(s => s.name.toLowerCase()).join(' ') || ''
-    if (userSchools.includes(query)) return true
-    
-    return false
-  })
-})
-
-// ⭐ Computed para usuarios paginados (después del filtro de búsqueda)
-const paginatedUsers = computed(() => {
-  const start = (currentPage.value - 1) * perPage.value
-  const end = start + perPage.value
-  return filteredUsers.value.slice(start, end)
-})
-
-// ⭐ Actualizar información de paginación según búsqueda
-const searchTotalPages = computed(() => {
-  return Math.ceil(filteredUsers.value.length / perPage.value) || 1
-})
-
-const searchTotalUsers = computed(() => {
-  return filteredUsers.value.length
-})
-
-// Computed para páginas visibles (actualizado para búsqueda)
-const displayVisiblePages = computed(() => {
-  const pages = []
-  const total = searchQuery.value ? searchTotalPages.value : totalPages.value
-  const current = currentPage.value
-  
-  if (total <= 7) {
-    for (let i = 1; i <= total; i++) {
-      pages.push(i)
-    }
-  } else {
-    pages.push(1)
-    if (current > 3) pages.push('...')
-    
-    for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
-      pages.push(i)
-    }
-    
-    if (current < total - 2) pages.push('...')
-    pages.push(total)
-  }
-  
-  return pages
-})
+const nextPage = () => { if (currentPage.value < totalPages.value) goToPage(currentPage.value + 1) }
+const previousPage = () => { if (currentPage.value > 1) goToPage(currentPage.value - 1) }
 
 // Descargar plantilla de Excel
 const downloadTemplate = () => {
@@ -771,7 +482,7 @@ const importUsers = async () => {
       successMessage.value = `¡${successCount} usuarios importados exitosamente en ${batches.length} lotes!`
     }
 
-    await loadUsers()
+    await loadUsers(1)
   } catch (error) {
     console.error('❌ Error general en importación:', error)
     errorMessage.value = 'Error al importar usuarios: ' + (error.message || 'Error desconocido')
@@ -779,9 +490,7 @@ const importUsers = async () => {
     loading.value = false
 
     if (failCount === 0) {
-      setTimeout(() => {
-        closeBulkModal()
-      }, 2000)
+      setTimeout(() => closeBulkModal(), 2000)
     }
   }
 }
@@ -861,7 +570,7 @@ onMounted(() => {
         </svg>
         <button
           v-if="searchQuery"
-          @click="searchQuery = ''; handleSearch()"
+          @click="searchQuery = ''"
           class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -870,7 +579,7 @@ onMounted(() => {
         </button>
       </div>
       <p v-if="searchQuery" class="text-sm text-gray-600 mt-2">
-        Mostrando {{ searchTotalUsers }} resultado(s) para "{{ searchQuery }}"
+        Mostrando {{ totalUsers }} resultado(s) para "{{ searchQuery }}"
       </p>
     </div>
 
@@ -899,15 +608,15 @@ onMounted(() => {
           <tr v-if="loading">
             <td colspan="6" class="px-6 py-4 text-center text-gray-500">Cargando...</td>
           </tr>
-          <tr v-else-if="paginatedUsers.length === 0 && searchQuery">
+          <tr v-else-if="users.length === 0 && searchQuery">
             <td colspan="6" class="px-6 py-4 text-center text-gray-500">
               No se encontraron usuarios que coincidan con "{{ searchQuery }}"
             </td>
           </tr>
-          <tr v-else-if="paginatedUsers.length === 0">
+          <tr v-else-if="users.length === 0">
             <td colspan="6" class="px-6 py-4 text-center text-gray-500">No hay usuarios registrados</td>
           </tr>
-          <tr v-else v-for="user in paginatedUsers" :key="user.id" class="hover:bg-gray-50">
+          <tr v-else v-for="user in users" :key="user.id" class="hover:bg-gray-50">
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="text-sm font-medium text-gray-900">{{ user.first_name }} {{ user.last_name }}</div>
             </td>
@@ -964,65 +673,41 @@ onMounted(() => {
         </tbody>
       </table>
 
-      <!-- ⭐ Paginación -->
-      <div v-if="(searchQuery ? searchTotalPages : totalPages) > 1" class="bg-gray-50 px-6 py-4 border-t border-gray-200">
+      <!-- Paginación -->
+      <div v-if="totalPages > 1" class="bg-gray-50 px-6 py-4 border-t border-gray-200">
         <div class="flex items-center justify-between">
-          <!-- Información de registros -->
           <div class="text-sm text-gray-700">
-            Mostrando 
-            <span class="font-medium">{{ ((currentPage - 1) * perPage) + 1 }}</span>
-            a 
-            <span class="font-medium">{{ Math.min(currentPage * perPage, searchQuery ? searchTotalUsers : totalUsers) }}</span>
-            de 
-            <span class="font-medium">{{ searchQuery ? searchTotalUsers : totalUsers }}</span>
-            usuarios
+            Total: <span class="font-medium">{{ totalUsers }}</span> usuarios
           </div>
-
-          <!-- Controles de navegación -->
           <div class="flex items-center space-x-2">
-            <!-- Botón anterior -->
             <button
               @click="previousPage"
               :disabled="currentPage === 1"
               class="px-3 py-2 text-sm font-medium rounded-lg border transition-colors"
-              :class="currentPage === 1 
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'"
-            >
-              ← Anterior
-            </button>
+              :class="currentPage === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'"
+            >← Anterior</button>
 
-            <!-- Números de página -->
             <div class="flex space-x-1">
               <button
-                v-for="page in displayVisiblePages"
+                v-for="page in visiblePages"
                 :key="page"
                 @click="typeof page === 'number' ? goToPage(page) : null"
                 :disabled="typeof page !== 'number'"
                 class="min-w-[40px] px-3 py-2 text-sm font-medium rounded-lg transition-colors"
                 :class="[
-                  page === currentPage 
-                    ? 'bg-blue-600 text-white' 
-                    : typeof page === 'number'
-                      ? 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
-                      : 'bg-white text-gray-400 cursor-default border-0'
+                  page === currentPage ? 'bg-blue-600 text-white'
+                  : typeof page === 'number' ? 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                  : 'bg-white text-gray-400 cursor-default border-0'
                 ]"
-              >
-                {{ page }}
-              </button>
+              >{{ page }}</button>
             </div>
 
-            <!-- Botón siguiente -->
             <button
               @click="nextPage"
-              :disabled="currentPage === (searchQuery ? searchTotalPages : totalPages)"
+              :disabled="currentPage === totalPages"
               class="px-3 py-2 text-sm font-medium rounded-lg border transition-colors"
-              :class="currentPage === (searchQuery ? searchTotalPages : totalPages)
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'"
-            >
-              Siguiente →
-            </button>
+              :class="currentPage === totalPages ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'"
+            >Siguiente →</button>
           </div>
         </div>
       </div>

@@ -2,9 +2,13 @@
 import api from './client'
 
 export const userService = {
-  // Listar todos los usuarios
-  getAll: async (page = 1, perPage = 50) => {
-    const { data } = await api.get(`/users?page=${page}&per_page=${perPage}`)
+  // Listar usuarios con filtros y paginación en servidor
+  getAll: async (page = 1, perPage = 25, filters = {}) => {
+    const params = new URLSearchParams({ page, per_page: perPage })
+    if (filters.search)              params.set('search', filters.search)
+    if (filters.schoolIds?.length)   params.set('school_ids', filters.schoolIds.join(','))
+    if (filters.excludeAdmins)       params.set('exclude_admins', '1')
+    const { data } = await api.get(`/users?${params}`)
     return data
   },
 
